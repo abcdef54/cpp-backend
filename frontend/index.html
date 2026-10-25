@@ -42,6 +42,7 @@
         label { display: block; margin: 16px 0; text-align: left; }
         input { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px; font: inherit; }
         #prediction, #model-status { display: block; margin: 16px 0; overflow-wrap: anywhere; }
+        #ws-log { max-height: 220px; overflow-y: auto; padding: 12px; background: #f5f5f5; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
     </style>
 </head>
 <body>
@@ -70,9 +71,140 @@
         <button id="generate" type="button">Get random number</button>
         <p id="status" role="status"></p>
         </section>
+        <section>
+            <h2>WebSocket echo</h2>
+            <p>Connect, then echo a message or request random numbers.</p>
+            <p id="ws-status" role="status">Disconnected</p>
+            <button id="ws-connect" type="button">Connect</button>
+            <button id="ws-disconnect" type="button" disabled>Disconnect</button>
+            <form id="ws-form">
+                <label for="ws-message">Message
+                    <input id="ws-message" type="text" value="Hello Drogon!" required>
+                </label>
+                <button id="ws-send" type="submit" disabled>Send echo</button>
+            </form>
+            <form id="ws-random-form">
+                <label for="ws-count">Number of random numbers (1–100)
+                    <input id="ws-count" type="number" min="1" max="100" step="1" value="10" required>
+                </label>
+                <button id="ws-random" type="submit" disabled>Generate N random numbers</button>
+            </form>
+            <p>Sends one request with your count. Each number arrives as a separate reply below.</p>
+            <pre id="ws-log" role="log" aria-label="WebSocket messages"></pre>
+            <button id="ws-clear" type="button">Clear messages</button>
+        </section>
     </main>
 
     <script>
+        const connectButton = document.getElementById('ws-connect');
+        const disconnectButton = document.getElementById('ws-disconnect');
+        const sendButton = document.getElementById('ws-send');
+        const randomButton = document.getElementById('ws-random');
+        const wsStatus = document.getElementById('ws-status');
+        const messageInput = document.getElementById('ws-message');
+        const wsLog = document.getElementById('ws-log');
+        let socket = null;
+
+        function logMessage(message) {
+            const lines = wsLog.textContent.split('\n').filter(Boolean);
+            lines.push(message);
+            wsLog.textContent = lines.slice(-100).join('\n') + '\n';
+            wsLog.scrollTop = wsLog.scrollHeight;
+        }
+
+        connectButton.addEventListener('click', () => {
+            if (socket && socket.readyState !== WebSocket.CLOSED) return;
+
+            const url = new URL('/echo', window.location.href);
+            url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            try {
+                socket = new WebSocket(url);
+            } catch (error) {
+                wsStatus.textContent = `Could not connect: ${error.message}`;
+                return;
+            }
+
+            connectButton.disabled = true;
+            disconnectButton.disabled = false;
+            wsStatus.textContent = 'Connecting…';
+
+            socket.addEventListener('open', () => {
+                wsStatus.textContent = 'Connected';
+                sendButton.disabled = false;
+                randomButton.disabled = false;
+                logMessage(`Connected to ${url}`);
+            });
+            socket.addEventListener('message', (event) => {
+                logMessage(`Received: ${event.data}`);
+            });
+            socket.addEventListener('error', () => {
+                wsStatus.textContent = 'Connection error';
+                logMessage('Connection error. Check that the backend is running with the /echo controller.');
+            });
+            socket.addEventListener('close', (event) => {
+                wsStatus.textContent = `Disconnected (code ${event.code})`;
+                logMessage(`Connection closed (code ${event.code}).`);
+                connectButton.disabled = false;
+                disconnectButton.disabled = true;
+                sendButton.disabled = true;
+                randomButton.disabled = true;
+                socket = null;
+            });
+        });
+
+        disconnectButton.addEventListener('click', () => {
+            if (!socket) return;
+            sendButton.disabled = true;
+            randomButton.disabled = true;
+            disconnectButton.disabled = true;
+            wsStatus.textContent = 'Disconnecting…';
+            socket.close(1000, 'Disconnected by user');
+        });
+
+        document.getElementById('ws-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                wsStatus.textContent = 'Connect before sending a message.';
+                return;
+            }
+            try {
+                const message = JSON.stringify({
+                    action: 'echo',
+                    message: messageInput.value
+                });
+                socket.send(message);
+                logMessage(`Sent: ${message}`);
+            } catch (error) {
+                logMessage(`Could not send: ${error.message}`);
+            }
+        });
+
+        document.getElementById('ws-random-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                wsStatus.textContent = 'Connect before requesting random numbers.';
+                return;
+            }
+
+            const count = document.getElementById('ws-count').valueAsNumber;
+            if (!Number.isInteger(count) || count < 1 || count > 100) {
+                wsStatus.textContent = 'Enter a whole number from 1 to 100.';
+                return;
+            }
+
+            try {
+                const message = JSON.stringify({ action: 'generate_random', count });
+                socket.send(message);
+                logMessage(`Sent: ${message}. Waiting for ${count} replies…`);
+            } catch (error) {
+                logMessage(`Could not request random numbers: ${error.message}`);
+            }
+        });
+
+        document.getElementById('ws-clear').addEventListener('click', () => {
+            wsLog.textContent = '';
+        });
+
         const button = document.getElementById('generate');
         const result = document.getElementById('result');
         const status = document.getElementById('status');

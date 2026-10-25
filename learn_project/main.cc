@@ -1,6 +1,7 @@
 #include <drogon/drogon.h>
 #include "controllers/Hydrology_V1_ModelController.h"
 #include "controllers/RandomController.h"
+#include "controllers/EchoWebSock.h"
 
 int main() {
     //Set HTTP listener address and port
