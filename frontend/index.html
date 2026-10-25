@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>C++ API demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 24px;
+            min-height: 100vh;
+            box-sizing: border-box;
+            display: grid;
+            place-items: center;
+            font-family: system-ui, sans-serif;
+            background: #f5f5f5;
+            color: #222;
+        }
+        main {
+            width: min(100%, 440px);
+            padding: 32px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            background: white;
+            text-align: center;
+        }
+        h1 { font-size: 24px; }
+        button {
+            padding: 12px 20px;
+            border: 0;
+            border-radius: 6px;
+            background: #222;
+            color: white;
+            font: inherit;
+            cursor: pointer;
+        }
+        button:disabled { opacity: 0.6; cursor: wait; }
+        #result { display: block; margin: 24px 0; font-size: 48px; }
+        #status { min-height: 3em; color: #555; }
+        section + section { border-top: 1px solid #ddd; margin-top: 24px; padding-top: 24px; }
+        label { display: block; margin: 16px 0; text-align: left; }
+        input { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px; font: inherit; }
+        #prediction, #model-status { display: block; margin: 16px 0; overflow-wrap: anywhere; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>C++ API demo</h1>
+        <section>
+            <h2>Model prediction</h2>
+            <p>Demo formula: feature1 × feature2 − feature1</p>
+            <form id="prediction-form">
+                <label for="feature1">Feature 1
+                    <input id="feature1" name="feature1" type="number" step="any" value="3" required>
+                </label>
+                <label for="feature2">Feature 2
+                    <input id="feature2" name="feature2" type="number" step="any" value="4" required>
+                </label>
+                <button id="predict" type="submit">Get prediction</button>
+            </form>
+            <output id="prediction" aria-live="polite">Prediction: —</output>
+            <button id="check-status" type="button">Check model status</button>
+            <output id="model-status" aria-live="polite">Status: —</output>
+        </section>
+        <section>
+        <h2>Random number</h2>
+        <p>Get a number from 1 to 100 from your C++ backend.</p>
+        <output id="result" aria-label="Random number" aria-live="polite">—</output>
+        <button id="generate" type="button">Get random number</button>
+        <p id="status" role="status"></p>
+        </section>
+    </main>
+
+    <script>
+        const button = document.getElementById('generate');
+        const result = document.getElementById('result');
+        const status = document.getElementById('status');
+
+        const modelBase = '/Hydrology/V1/ModelController';
+        const predictButton = document.getElementById('predict');
+        const prediction = document.getElementById('prediction');
+        const checkButton = document.getElementById('check-status');
+        const modelStatus = document.getElementById('model-status');
+
+        async function fetchJson(url, options = {}) {
+            const response = await fetch(url, {
+                ...options,
+                cache: 'no-store',
+                signal: AbortSignal.timeout(10000)
+            });
+            if (!response.ok) {
+                throw new Error(`Request failed (${response.status}).`);
+            }
+            return response.json();
+        }
+
+        document.getElementById('prediction-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const feature1 = document.getElementById('feature1').valueAsNumber;
+            const feature2 = document.getElementById('feature2').valueAsNumber;
+            if (!Number.isFinite(feature1) || !Number.isFinite(feature2)) {
+                prediction.textContent = 'Enter two valid numbers.';
+                return;
+            }
+
+            predictButton.disabled = true;
+            prediction.textContent = 'Loading prediction…';
+            try {
+                const data = await fetchJson(`${modelBase}/predict`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ feature1, feature2 })
+                });
+                if (typeof data.prediction !== 'number' || !Number.isFinite(data.prediction)) {
+                    throw new Error('The server returned an invalid prediction.');
+                }
+                prediction.textContent = `Prediction: ${data.prediction}`;
+            } catch (error) {
+                prediction.textContent = `Could not get prediction: ${error.message}`;
+            } finally {
+                predictButton.disabled = false;
+            }
+        });
+
+        checkButton.addEventListener('click', async () => {
+            checkButton.disabled = true;
+            modelStatus.textContent = 'Loading status…';
+            try {
+                const data = await fetchJson(`${modelBase}/check`);
+                if (typeof data.status !== 'string') {
+                    throw new Error('The server returned an invalid status.');
+                }
+                modelStatus.textContent = `Status: ${data.status}`;
+            } catch (error) {
+                modelStatus.textContent = `Could not get status: ${error.message}`;
+            } finally {
+                checkButton.disabled = false;
+            }
+        });
+
+        button.addEventListener('click', async () => {
+            button.disabled = true;
+            status.textContent = 'Loading…';
+
+            try {
+                const response = await fetch('/random', {
+                    cache: 'no-store',
+                    signal: AbortSignal.timeout(10000)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed (${response.status}).`);
+                }
+
+                const data = await response.json();
+                if (!Number.isInteger(data.random_num) ||
+                    data.random_num < 1 || data.random_num > 100) {
+                    throw new Error('The server returned an invalid number.');
+                }
+
+                result.textContent = data.random_num;
+                status.textContent = 'Number received from Drogon.';
+            } catch (error) {
+                status.textContent = 'Could not get a number. Please try again.';
+            } finally {
+                button.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
